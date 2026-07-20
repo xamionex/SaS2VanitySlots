@@ -21,10 +21,11 @@ namespace SaS2VanitySlots;
 /// replaced at this layer, while <c>PlayerEquipment.equippedItem[]</c>/<c>invItem[]</c> (and thus
 /// all stats, weight, requirements, animations) are left untouched.
 ///
-/// Local-only: the patch keys off <c>character.playerSaveIdx</c>, which is the local player's
-/// save slot. Remote/ coop players are drawn from their own (real) equipment, so vanity is only
-/// seen by the local player. Syncing vanity to other players would require network packets and
-/// is intentionally out of scope for v1.
+/// Local-only: the patch keys off the owning <c>Player.ID</c> plus
+/// <c>character.playerSaveIdx</c>, since each Player has its own PlayerSaveList and the save index
+/// alone is ambiguous across local coop players. Remote/ coop players are drawn from their own
+/// (real) equipment, so vanity is only seen by the local player. Syncing vanity to other players
+/// would require network packets and is intentionally out of scope for v1.
 /// </summary>
 [HarmonyPatch]
 public static class VanityPatch
@@ -129,16 +130,20 @@ public static class VanityPatch
     {
         var character = GetCharacter(instance);
         var saveIdx = character != null ? character.playerSaveIdx : -1;
+        // p is the character's owning Player (passed in by GetEquipmentXTexture / the
+        // GetPlayerSaveEquipmentXTexture caller chain), so p.ID is the per-player discriminator
+        // (0 = P1, 1 = P2). playerSaveIdx alone is ambiguous: each Player has its own save list.
+        var playerId = p != null ? p.ID : 0;
         var perCharacter = SaS2VanitySlotsPlugin.PerCharacter;
 
         // Naked slot: hide the visual entirely (same as hideHelm returning null for the helm).
-        if (VanityStore.IsNaked(equipment, saveIdx, perCharacter))
+        if (VanityStore.IsNaked(equipment, playerId, saveIdx, perCharacter))
         {
             __result = null;
             return false;
         }
 
-        var vanityLootIdx = VanityStore.GetVanityLootIdx(equipment, saveIdx, perCharacter);
+        var vanityLootIdx = VanityStore.GetVanityLootIdx(equipment, playerId, saveIdx, perCharacter);
         if (vanityLootIdx < 0 || vanityLootIdx >= LootCatalog.lootDef.Count) return true;
 
         var lDef = LootCatalog.lootDef[vanityLootIdx];

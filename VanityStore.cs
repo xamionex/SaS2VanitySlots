@@ -10,23 +10,29 @@ using ProjectMage.player;
 namespace SaS2VanitySlots;
 
 /// <summary>
-/// Per-character (or global) vanity overrides for the 7 visible equipment slots.
+/// Per-player, per-character (or per-player global) vanity overrides for the 7 visible equipment
+/// slots.
 ///
 /// Each of the 7 visible slots can have:
 ///   - a vanity lootIdx (the item whose texture is shown instead of the real equipped item), or -1
 ///   - a naked flag (when true, the slot's texture is hidden, same as the vanilla hideHelm path)
 ///
-/// Keying:
-///   - By default (PerCharacter mode) overrides are keyed by the character's playerSaveIdx, so
-///     each save/character has its own vanity set.
-///   - When the user toggles "Per Character" off in Mod Options, a single global set is shared
-///     across all characters (key "_global").
+/// Keying (mirrors SaS2DevTools' per-player PlayerCheats pattern):
+///   - Always namespaced by the owning player's ID (Player.ID, 0 or 1), because playerSaveIdx is
+///     only unique within one Player's PlayerSaveList. P1 and P2 each have their own save slot 0,
+///     so keying by saveIdx alone collides between local coop players.
+///   - By default (PerCharacter mode) the key is "p{playerId}:{saveIdx}", so each player's each
+///     save/character has its own vanity set.
+///   - When the user toggles "Per Character" off in Mod Options, the key is "p{playerId}:_global",
+///     so each player has one shared set across their own saves, but P1 and P2 stay separate.
 ///
 /// Persistence:
 ///   Stored in the BepInEx config file as one string entry per slot. Each entry is a
 ///   semicolon-separated list of "key=lootIdx|naked" pairs. This is a mod config, not a save:
 ///   nothing is written to the player save, so the "Show All Items" toggle in Mod Options can be
 ///   turned off to go back to discovered-only without persisting any discovery state.
+///   Backward compat: keys written before the per-player change have no "p{ID}:" prefix; those
+///   are treated as belonging to player 0 (P1), so existing configs keep working unchanged.
 ///
 /// Visual-only: the real <see cref="PlayerEquipment.equippedItem"/>[] and invItem[] are never
 /// touched; only <see cref="CharTexture.GetEquipmentXTexture"/> is intercepted.
@@ -54,6 +60,9 @@ internal static class VanityStore
 
     private const string GlobalKey = "_global";
 
+    // Player ID prefix used in every per-player key, e.g. "p0:2" = player 1, save slot 2.
+    private const string PlayerPrefix = "p";
+
     // One config entry per slot. Value is a serialized map: "key=li|n;key2=li2|n2".
     private static readonly ConfigEntry<string>[] _slotEntries = new ConfigEntry<string>[7];
 
@@ -80,62 +89,65 @@ internal static class VanityStore
                 "",
                 new ConfigDescription(
                     "Vanity override for " + SlotNames[i] +
-                    " slot. Serialized as key=lootIdx|naked pairs separated by ;. " +
+                    " slot. Serialized as p<playerId>=<saveIdx|_global>=lootIdx|naked pairs separated by ;. " +
                     "Managed by the in-game Vanity menu; edit manually at your own risk."));
         }
     }
 
     /// <summary>
-    /// Returns the active character key for a given saveIdx under the current mode.
-    /// In PerCharacter mode, returns the saveIdx as a string; in global mode returns "_global".
+    /// Returns the active character key for a given player's saveIdx under the current mode.
+    /// Always namespaced by the player ID so P1 and P2 never collide (each Player has its own
+    /// PlayerSaveList with the same 0..5 save indices).
+    /// In PerCharacter mode the suffix is the saveIdx; in global mode it is "_global".
     /// </summary>
-    public static string CharKey(int saveIdx, bool perCharacter)
+    public static string CharKey(int playerId, int saveIdx, bool perCharacter)
     {
-        return perCharacter ? saveIdx.ToString() : GlobalKey;
+        var suffix = perCharacter ? saveIdx.ToString() : GlobalKey;
+        return PlayerPrefix + playerId + ":" + suffix;
     }
 
-    public static int GetVanityLootIdx(int slot, int saveIdx, bool perCharacter)
+    public static int GetVanityLootIdx(int slot, int playerId, int saveIdx, bool perCharacter)
     {
-        var s = GetState(slot, saveIdx, perCharacter);
+        var s = GetState(slot, playerId, saveIdx, perCharacter);
         return s.LootIdx;
     }
 
-    public static bool IsNaked(int slot, int saveIdx, bool perCharacter)
+    public static bool IsNaked(int slot, int playerId, int saveIdx, bool perCharacter)
     {
-        var s = GetState(slot, saveIdx, perCharacter);
+        var s = GetState(slot, playerId, saveIdx, perCharacter);
         return s.Naked;
     }
 
-    public static void SetVanityLootIdx(int slot, int saveIdx, bool perCharacter, int lootIdx)
+    public static void SetVanityLootIdx(int slot, int playerId, int saveIdx, bool perCharacter, int lootIdx)
     {
         var map = GetOrInitSlot(slot);
-        var key = CharKey(saveIdx, perCharacter);
+        var key = CharKey(playerId, saveIdx, perCharacter);
         map[key] = new VanitySlotState { LootIdx = lootIdx, Naked = map.ContainsKey(key) && map[key].Naked };
         SaveSlot(slot);
     }
 
-    public static void ToggleNaked(int slot, int saveIdx, bool perCharacter)
+    public static void ToggleNaked(int slot, int playerId, int saveIdx, bool perCharacter)
     {
         var map = GetOrInitSlot(slot);
-        var key = CharKey(saveIdx, perCharacter);
+        var key = CharKey(playerId, saveIdx, perCharacter);
         VanitySlotState cur;
         if (!map.TryGetValue(key, out cur)) cur = new VanitySlotState { LootIdx = -1 };
         map[key] = new VanitySlotState { LootIdx = cur.LootIdx, Naked = !cur.Naked };
         SaveSlot(slot);
     }
 
-    public static void ClearSlot(int slot, int saveIdx, bool perCharacter)
+    public static void ClearSlot(int slot, int playerId, int saveIdx, bool perCharacter)
     {
         var map = GetOrInitSlot(slot);
-        var key = CharKey(saveIdx, perCharacter);
+        var key = CharKey(playerId, saveIdx, perCharacter);
         map[key] = new VanitySlotState { LootIdx = -1, Naked = false };
         SaveSlot(slot);
     }
 
-    private static VanitySlotState GetState(int slot, int saveIdx, bool perCharacter)
+    private static VanitySlotState GetState(int slot, int playerId, int saveIdx, bool perCharacter)
     {
         var map = GetOrInitSlot(slot);
-        var key = CharKey(saveIdx, perCharacter);
+        var key = CharKey(playerId, saveIdx, perCharacter);
         VanitySlotState s;
         return map.TryGetValue(key, out s) ? s : new VanitySlotState { LootIdx = -1 };
     }
@@ -175,6 +187,10 @@ internal static class VanityStore
                 bool n;
                 int.TryParse(vp.Length > 0 ? vp[0] : "-1", out li);
                 bool.TryParse(vp.Length > 1 ? vp[1] : "0", out n);
+                // Backward compat: pre-per-player keys had no "p{ID}:" prefix (a bare saveIdx or
+                // "_global"). Treat those as belonging to player 0 (P1) so existing configs keep
+                // working without losing the user's saved vanity.
+                if (key.IndexOf(':') < 0) key = PlayerPrefix + 0 + ":" + key;
                 map[key] = new VanitySlotState { LootIdx = li, Naked = n };
             }
         }

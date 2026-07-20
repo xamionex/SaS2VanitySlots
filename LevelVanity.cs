@@ -85,6 +85,10 @@ public class LevelVanity : LevelBase
 
     private int CurrentSlot => VanityStore.VisibleSlots[_selectedSlotIndex];
 
+    // Owning player's ID (0 = P1, 1 = P2). Vanity is keyed per-player so P1 and P2 keep separate
+    // sets even when their characters share the same save slot index.
+    private int PlayerId => player.ID;
+
     private int SaveIdx
     {
         get
@@ -142,7 +146,7 @@ public class LevelVanity : LevelBase
             _selectedItemIndex = 0;
             _scrollOffset = 0f;
             // Pre-select the current vanity item if it is in the list.
-            var cur = VanityStore.GetVanityLootIdx(slot, SaveIdx, perChar);
+            var cur = VanityStore.GetVanityLootIdx(slot, PlayerId, SaveIdx, perChar);
             if (cur >= 0 && _candidateList != null)
             {
                 var idx = _candidateList.IndexOf(cur);
@@ -159,7 +163,7 @@ public class LevelVanity : LevelBase
             // Edge-detect: only fire on the frame the keybind transitions to held.
             if (!_nakedHeldLastFrame)
             {
-                VanityStore.ToggleNaked(slot, SaveIdx, perChar);
+                VanityStore.ToggleNaked(slot, PlayerId, SaveIdx, perChar);
                 PlaySelect();
             }
             _nakedHeldLastFrame = true;
@@ -170,7 +174,7 @@ public class LevelVanity : LevelBase
         // Clear slot (reset to no override, not naked).
         if (player.keys.keyXOption)
         {
-            VanityStore.ClearSlot(slot, SaveIdx, perChar);
+            VanityStore.ClearSlot(slot, PlayerId, SaveIdx, perChar);
             PlaySelect();
             return;
         }
@@ -216,7 +220,7 @@ public class LevelVanity : LevelBase
         if (player.keys.keyAccept)
         {
             var lootIdx = _candidateList[_selectedItemIndex];
-            VanityStore.SetVanityLootIdx(CurrentSlot, SaveIdx, SaS2VanitySlotsPlugin.PerCharacter, lootIdx);
+            VanityStore.SetVanityLootIdx(CurrentSlot, PlayerId, SaveIdx, SaS2VanitySlotsPlugin.PerCharacter, lootIdx);
             PlayAccept();
             _mode = Mode.SlotList;
             return;
@@ -225,7 +229,7 @@ public class LevelVanity : LevelBase
         // X-option in the picker clears the vanity override for this slot.
         if (player.keys.keyXOption)
         {
-            VanityStore.ClearSlot(CurrentSlot, SaveIdx, SaS2VanitySlotsPlugin.PerCharacter);
+            VanityStore.ClearSlot(CurrentSlot, PlayerId, SaveIdx, SaS2VanitySlotsPlugin.PerCharacter);
             PlaySelect();
             _mode = Mode.SlotList;
         }
@@ -293,14 +297,14 @@ public class LevelVanity : LevelBase
                 if (hit.Index != _selectedItemIndex) _selectedItemIndex = hit.Index;
                 if (leftClick)
                 {
-                    VanityStore.SetVanityLootIdx(CurrentSlot, SaveIdx, SaS2VanitySlotsPlugin.PerCharacter,
+                    VanityStore.SetVanityLootIdx(CurrentSlot, PlayerId, SaveIdx, SaS2VanitySlotsPlugin.PerCharacter,
                         _candidateList[_selectedItemIndex]);
                     PlayAccept();
                     _mode = Mode.SlotList;
                 }
                 else
                 {
-                    VanityStore.ClearSlot(CurrentSlot, SaveIdx, SaS2VanitySlotsPlugin.PerCharacter);
+                    VanityStore.ClearSlot(CurrentSlot, PlayerId, SaveIdx, SaS2VanitySlotsPlugin.PerCharacter);
                     PlaySelect();
                     _mode = Mode.SlotList;
                 }
@@ -315,7 +319,7 @@ public class LevelVanity : LevelBase
                 _mode = Mode.ItemPicker;
                 _selectedItemIndex = 0;
                 _scrollOffset = 0f;
-                var cur = VanityStore.GetVanityLootIdx(CurrentSlot, SaveIdx, SaS2VanitySlotsPlugin.PerCharacter);
+                var cur = VanityStore.GetVanityLootIdx(CurrentSlot, PlayerId, SaveIdx, SaS2VanitySlotsPlugin.PerCharacter);
                 if (cur >= 0 && _candidateList != null)
                 {
                     var idx = _candidateList.IndexOf(cur);
@@ -325,7 +329,7 @@ public class LevelVanity : LevelBase
             }
             else
             {
-                VanityStore.ClearSlot(CurrentSlot, SaveIdx, SaS2VanitySlotsPlugin.PerCharacter);
+                VanityStore.ClearSlot(CurrentSlot, PlayerId, SaveIdx, SaS2VanitySlotsPlugin.PerCharacter);
                 PlaySelect();
             }
             return true;
@@ -384,6 +388,7 @@ public class LevelVanity : LevelBase
         float listVisibleHeight)
     {
         var perChar = SaS2VanitySlotsPlugin.PerCharacter;
+        var playerId = PlayerId;
         var saveIdx = SaveIdx;
 
         for (var i = 0; i < VanityStore.VisibleSlots.Length; i++)
@@ -410,7 +415,7 @@ public class LevelVanity : LevelBase
                 Text.DrawText(new StringBuilder(VanityStore.SlotNames[i]),
                     new Vector2(x + 10, textY), textColor, 0.7f, 0);
 
-                var valStr = FormatSlotValue(slot, saveIdx, perChar);
+                var valStr = FormatSlotValue(slot, playerId, saveIdx, perChar);
                 Text.DrawText(new StringBuilder(valStr),
                     new Vector2(x + listWidth - ValueWidth, textY), textColor, 0.7f, 0);
             }
@@ -465,10 +470,10 @@ public class LevelVanity : LevelBase
         }
     }
 
-    private string FormatSlotValue(int slot, int saveIdx, bool perChar)
+    private string FormatSlotValue(int slot, int playerId, int saveIdx, bool perChar)
     {
-        if (VanityStore.IsNaked(slot, saveIdx, perChar)) return "[Naked]";
-        var li = VanityStore.GetVanityLootIdx(slot, saveIdx, perChar);
+        if (VanityStore.IsNaked(slot, playerId, saveIdx, perChar)) return "[Naked]";
+        var li = VanityStore.GetVanityLootIdx(slot, playerId, saveIdx, perChar);
         if (li < 0 || li >= LootCatalog.lootDef.Count) return "Default";
         var lDef = LootCatalog.lootDef[li];
         var name = lDef.title.Length > 0 ? lDef.title[Game1.language] : lDef.name;
