@@ -56,9 +56,9 @@ public class SaS2VanitySlotsPlugin : BasePlugin
         // Register with SaS2ModOptions so they appear in the in-game Mod Options menu.
         if (SaS2ModOptionsApi.IsAvailable)
         {
-            SaS2ModOptionsApi.RegisterConfig(_perCharacterEntry, PluginInfo.PluginName, "Per Character", 0);
-            SaS2ModOptionsApi.RegisterConfig(_showAllItemsEntry, PluginInfo.PluginName, "Show All Items", 1);
-            SaS2ModOptionsApi.RegisterKeybind(_nakedKeybindEntry, PluginInfo.PluginName, "Naked Toggle", 2);
+            SaS2ModOptionsApi.RegisterConfig(_perCharacterEntry, "Vanity Slots", "Per Character", 0);
+            SaS2ModOptionsApi.RegisterConfig(_showAllItemsEntry, "Vanity Slots", "Show All Items", 1);
+            SaS2ModOptionsApi.RegisterKeybind(_nakedKeybindEntry, "Vanity Slots", "Naked Toggle", 2);
             Log.LogInfo("Registered with SaS2ModOptions.");
         }
         else
