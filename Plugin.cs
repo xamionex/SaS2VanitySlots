@@ -20,6 +20,9 @@ public class SaS2VanitySlotsPlugin : BasePlugin
     private static ConfigEntry<bool> _showAllItemsEntry;
     private static ConfigEntry<bool> _perCharacterEntry;
     private static ConfigEntry<string> _nakedKeybindEntry;
+    private static ConfigEntry<bool> _wrapDownEntry;
+    private static ConfigEntry<bool> _wrapUpEntry;
+    private static ConfigEntry<float> _menuScaleEntry;
     internal static Keybind NakedKeybind;
 
     public override void Load()
@@ -51,6 +54,25 @@ public class SaS2VanitySlotsPlugin : BasePlugin
             new ConfigDescription("Hold this combo while a slot is selected in the Vanity menu to toggle naked mode for that slot."));
         NakedKeybind = new Keybind(_nakedKeybindEntry);
 
+        // Wrap Down / Wrap Up: when on (default) the selection wraps around at the ends of the
+        // slot list and the item picker, matching the Mod Options and Dev Tools menus.
+        _wrapDownEntry = Config.Bind(
+            "Vanity - General", "WrapDown", true,
+            new ConfigDescription(
+                "When on, pressing down on the last option wraps around to the top of the menu. " +
+                "Applies to both the slot list and the item picker."));
+
+        _wrapUpEntry = Config.Bind(
+            "Vanity - General", "WrapUp", true,
+            new ConfigDescription(
+                "When on, pressing up on the first option wraps around to the bottom of the menu. " +
+                "Applies to both the slot list and the item picker."));
+
+        // Menu scale: shrinks or grows the whole panel. Clamped to 0.5 - 2.0 where it is read.
+        _menuScaleEntry = Config.Bind(
+            "Vanity - General", "MenuScale", 1.0f,
+            new ConfigDescription("Scales the Vanity menu. 1.0 = default size (usable range 0.5 - 2.0)."));
+
         VanityStore.Init(Config);
 
         // Register with SaS2ModOptions so they appear in the in-game Mod Options menu.
@@ -59,6 +81,9 @@ public class SaS2VanitySlotsPlugin : BasePlugin
             SaS2ModOptionsApi.RegisterConfig(_perCharacterEntry, "Vanity Slots", "Per Character", 0);
             SaS2ModOptionsApi.RegisterConfig(_showAllItemsEntry, "Vanity Slots", "Show All Items", 1);
             SaS2ModOptionsApi.RegisterKeybind(_nakedKeybindEntry, "Vanity Slots", "Naked Toggle", 2);
+            SaS2ModOptionsApi.RegisterConfig(_wrapDownEntry, "Vanity Slots", "Wrap Around When Going Down", 3);
+            SaS2ModOptionsApi.RegisterConfig(_wrapUpEntry, "Vanity Slots", "Wrap Around When Going Up", 4);
+            SaS2ModOptionsApi.RegisterConfig(_menuScaleEntry, "Vanity Slots", "Menu Scale", 5);
             Log.LogInfo("Registered with SaS2ModOptions.");
         }
         else
@@ -82,6 +107,15 @@ public class SaS2VanitySlotsPlugin : BasePlugin
 
     /// Live-read of the Per Character toggle. When true, vanity is keyed by save index.
     internal static bool PerCharacter => _perCharacterEntry == null || _perCharacterEntry.Value;
+
+    /// Live-read of the Wrap Down toggle. When true the selection wraps from the last row to the first.
+    internal static bool WrapDown => _wrapDownEntry == null || _wrapDownEntry.Value;
+
+    /// Live-read of the Wrap Up toggle. When true the selection wraps from the first row to the last.
+    internal static bool WrapUp => _wrapUpEntry == null || _wrapUpEntry.Value;
+
+    /// Live-read of the menu scale. Clamped to 0.5 - 2.0 where it is used.
+    internal static float MenuScale => _menuScaleEntry != null ? _menuScaleEntry.Value : 1f;
 }
 
 /// <summary>

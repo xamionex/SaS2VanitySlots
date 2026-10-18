@@ -34,8 +34,12 @@ public class LevelVanity : LevelBase
 
     private const float ItemHeight = 40f;
     private const float TopMargin = 40f;
-    private const float BottomMargin = 40f;
+    private const float BottomMargin = 40f; // space kept clear under the last item, above the control tips
     private const float ValueWidth = 240f;
+
+    // The control tips keep the screen position they had before the box was made taller to cover tips
+    private const float OldBoxHeightFactor = 0.7f;
+    private const float TipsOffsetY = 25f;
 
     private readonly int _returnScreen;
     private Mode _mode = Mode.SlotList;
@@ -44,6 +48,7 @@ public class LevelVanity : LevelBase
     private int _selectedItemIndex; // index into _candidateList (ItemPicker mode)
     private float _scrollOffset;
     private float _currentListVisibleHeight;
+    private float _currentScale = 1f;
 
     private List<int> _candidateList; // lootIdx candidates for the selected slot
     private bool _candidatesShowAll; // showAll snapshot at build time
@@ -109,6 +114,26 @@ public class LevelVanity : LevelBase
 
     private static int Clamp(int value, int min, int max) => Math.Max(min, Math.Min(max, value));
 
+    // Moves the selection one row up or down. At either end the move only happens when the matching
+    // Wrap Up / Wrap Down setting is on; otherwise the selection stays put.
+    private static bool StepSelection(ref int index, int count, bool up)
+    {
+        if (up)
+        {
+            if (index > 0) index--;
+            else if (SaS2VanitySlotsPlugin.WrapUp) index = count - 1;
+            else return false;
+        }
+        else
+        {
+            if (index < count - 1) index++;
+            else if (SaS2VanitySlotsPlugin.WrapDown) index = 0;
+            else return false;
+        }
+
+        return true;
+    }
+
     public override void Update(Character character, float frameTime)
     {
         if (!CanInput()) return;
@@ -128,10 +153,9 @@ public class LevelVanity : LevelBase
     {
         if (player.keys.keyUp || player.keys.keyDown)
         {
-            var dir = player.keys.keyUp ? -1 : 1;
-            _selectedSlotIndex = (_selectedSlotIndex + dir + VanityStore.VisibleSlots.Length) %
-                                 VanityStore.VisibleSlots.Length;
+            if (!StepSelection(ref _selectedSlotIndex, VanityStore.VisibleSlots.Length, player.keys.keyUp)) return;
             PlaySelect();
+            EnsureVisible();
             return;
         }
 
@@ -210,8 +234,7 @@ public class LevelVanity : LevelBase
 
         if (player.keys.keyUp || player.keys.keyDown)
         {
-            var dir = player.keys.keyUp ? -1 : 1;
-            _selectedItemIndex = (_selectedItemIndex + dir + _candidateList.Count) % _candidateList.Count;
+            if (!StepSelection(ref _selectedItemIndex, _candidateList.Count, player.keys.keyUp)) return;
             PlaySelect();
             EnsureVisible();
             return;
@@ -272,13 +295,19 @@ public class LevelVanity : LevelBase
 
         if (MouseMgr.isScrollUp || MouseMgr.isScrollDown)
         {
-            var dir = MouseMgr.isScrollUp ? -1 : 1;
+            var up = MouseMgr.isScrollUp;
+            // The latches are consumed before moving so one notch steps exactly one row.
             MouseMgr.isScrollUp = false;
             MouseMgr.isScrollDown = false;
             if (_mode == Mode.ItemPicker)
-                _selectedItemIndex = (_selectedItemIndex + dir + count) % count;
+            {
+                if (!StepSelection(ref _selectedItemIndex, count, up)) return true;
+            }
             else
-                _selectedSlotIndex = (_selectedSlotIndex + dir + count) % count;
+            {
+                if (!StepSelection(ref _selectedSlotIndex, count, up)) return true;
+            }
+
             PlaySelect();
             EnsureVisible();
             return true;
@@ -369,25 +398,34 @@ public class LevelVanity : LevelBase
     {
         base.Draw();
         var vp = Game1.Instance.GraphicsDevice.Viewport;
-        var boxWidth = vp.Width * 0.5f;
-        var boxHeight = vp.Height * 0.8f;
+        // Clamped here so a hand-edited config value cannot make the layout unusable.
+        var scale = Math.Max(0.5f, Math.Min(2f, SaS2VanitySlotsPlugin.MenuScale));
+        _currentScale = scale;
+        var boxWidth = vp.Width * 0.5f * scale;
+        var boxHeight = vp.Height * 0.9f * scale;
 
         var margin = boxWidth * 0.025f;
         var isMainPlayer = player.ID == GameSessionMgr.gameSession.mainPlayerIdx;
         var boxX = isMainPlayer ? 0f - margin : vp.Width * 0.5f + margin;
+        const float boxYOffset = 30f; // To cover the tips
         var boxY = (vp.Height - boxHeight) / 2f;
+        boxY += boxYOffset * 1.5f; // For full tips coverage
 
         UIRender.DrawRect(new Rectangle((int)boxX, (int)boxY, (int)boxWidth, (int)boxHeight),
             0.85f, 0, 1f, 1f, UIRender.interfaceTex);
 
         var title = _mode == Mode.ItemPicker ? "Vanity - Pick Item" : "Vanity";
         Text.DrawText(new StringBuilder(title),
-            new Vector2(boxX + boxWidth / 2f, boxY + 30f), Color.Yellow, 0.85f, 1);
+            new Vector2(boxX + boxWidth / 2f, boxY + 30f * scale), Color.Yellow, 0.85f * scale, 1);
 
-        var listX = boxX + 40f;
-        var listY = boxY + TopMargin;
-        var listWidth = boxWidth - 80f;
-        var listVisibleHeight = boxHeight - TopMargin - BottomMargin;
+        // Where the tips start.
+        var tipsY = vp.Height * (1f + OldBoxHeightFactor * scale) * 0.5f + TipsOffsetY * scale;
+
+        var listX = boxX + 40f * scale;
+        var listY = boxY + TopMargin * scale;
+        var listWidth = boxWidth - 80f * scale;
+        // A partly scrolled row can hang below the visible height by up to one item height, so that much is reserved on top of the bottom margin to keep every row clear of the tips.
+        var listVisibleHeight = Math.Max(0f, tipsY - (ItemHeight + BottomMargin) * scale - listY);
         _currentListVisibleHeight = listVisibleHeight;
 
         _itemHitRects.Clear();
@@ -396,99 +434,102 @@ public class LevelVanity : LevelBase
 
         if (_mode == Mode.ItemPicker)
         {
-            DrawItemPicker(listX, currentY, listX, listY, listWidth, listVisibleHeight);
+            DrawItemPicker(listX, currentY, listY, listWidth, listVisibleHeight, scale);
         }
         else
         {
-            DrawSlotList(listX, currentY, listX, listY, listWidth, listVisibleHeight);
+            DrawSlotList(listX, currentY, listY, listWidth, listVisibleHeight, scale);
         }
 
-        DrawHelpBar(boxX, boxWidth, vp.Height);
+        DrawHelpBar(boxX, boxWidth, tipsY, scale);
     }
 
-    private void DrawSlotList(float x, float currentY, float listX, float listY, float listWidth,
-        float listVisibleHeight)
+    private void DrawSlotList(float x, float currentY, float listY, float listWidth, float listVisibleHeight,
+        float scale)
     {
         var perChar = SaS2VanitySlotsPlugin.PerCharacter;
         var playerId = PlayerId;
         var saveIdx = SaveIdx;
+        var itemHeight = ItemHeight * scale;
 
         for (var i = 0; i < VanityStore.VisibleSlots.Length; i++)
         {
             var slot = VanityStore.VisibleSlots[i];
             var selected = i == _selectedSlotIndex;
 
-            if (currentY + ItemHeight > listY && currentY < listY + listVisibleHeight)
+            if (currentY + itemHeight > listY && currentY < listY + listVisibleHeight)
             {
                 _itemHitRects.Add(new ItemHit
                 {
                     Index = i,
-                    Rect = new Rectangle((int)x, (int)currentY, (int)listWidth, (int)ItemHeight)
+                    Rect = new Rectangle((int)x, (int)currentY, (int)listWidth, (int)itemHeight)
                 });
 
                 if (selected)
                     UIRender.DrawRect(
-                        new Rectangle((int)x, (int)currentY, (int)listWidth, (int)ItemHeight),
+                        new Rectangle((int)x, (int)currentY, (int)listWidth, (int)itemHeight),
                         0.2f, 3, 1f, 1f, UIRender.interfaceTex);
 
                 var textColor = selected ? Color.Yellow : Color.White;
-                var textY = currentY + ItemHeight * 0.75f;
+                var textY = currentY + itemHeight * 0.75f;
 
                 Text.DrawText(new StringBuilder(VanityStore.SlotNames[i]),
-                    new Vector2(x + 10, textY), textColor, 0.7f, 0);
+                    new Vector2(x + 10f * scale, textY), textColor, 0.7f * scale, 0);
 
                 var valStr = FormatSlotValue(slot, playerId, saveIdx, perChar);
                 Text.DrawText(new StringBuilder(valStr),
-                    new Vector2(x + listWidth - ValueWidth, textY), textColor, 0.7f, 0);
+                    new Vector2(x + listWidth - ValueWidth * scale, textY), textColor, 0.7f * scale, 0);
             }
 
-            currentY += ItemHeight;
+            currentY += itemHeight;
         }
     }
 
-    private void DrawItemPicker(float x, float currentY, float listX, float listY, float listWidth,
-        float listVisibleHeight)
+    private void DrawItemPicker(float x, float currentY, float listY, float listWidth, float listVisibleHeight,
+        float scale)
     {
         if (_candidateList == null || _candidateList.Count == 0)
         {
             Text.DrawText(new StringBuilder("No items discovered for this slot."),
-                new Vector2(x, currentY + 10f), new Color(0.7f, 0.7f, 0.7f, 1f), 0.7f, 0);
+                new Vector2(x, currentY + 10f * scale), new Color(0.7f, 0.7f, 0.7f, 1f), 0.7f * scale, 0);
             return;
         }
+
+        var itemHeight = ItemHeight * scale;
 
         for (var i = 0; i < _candidateList.Count; i++)
         {
             var lootIdx = _candidateList[i];
             var selected = i == _selectedItemIndex;
 
-            if (currentY + ItemHeight > listY && currentY < listY + listVisibleHeight)
+            if (currentY + itemHeight > listY && currentY < listY + listVisibleHeight)
             {
                 _itemHitRects.Add(new ItemHit
                 {
                     Index = i,
-                    Rect = new Rectangle((int)x, (int)currentY, (int)listWidth, (int)ItemHeight)
+                    Rect = new Rectangle((int)x, (int)currentY, (int)listWidth, (int)itemHeight)
                 });
 
                 if (selected)
                     UIRender.DrawRect(
-                        new Rectangle((int)x, (int)currentY, (int)listWidth, (int)ItemHeight),
+                        new Rectangle((int)x, (int)currentY, (int)listWidth, (int)itemHeight),
                         0.2f, 3, 1f, 1f, UIRender.interfaceTex);
 
                 var textColor = selected ? Color.Yellow : Color.White;
-                var textY = currentY + ItemHeight * 0.75f;
+                var textY = currentY + itemHeight * 0.75f;
                 var lDef = LootCatalog.lootDef[lootIdx];
                 var name = lDef.title.Length > 0 ? lDef.title[Game1.language] : lDef.name;
 
                 Text.DrawText(new StringBuilder(name),
-                    new Vector2(x + 10, textY), textColor, 0.7f, 0);
+                    new Vector2(x + 10f * scale, textY), textColor, 0.7f * scale, 0);
 
                 // Show the lootIdx on the right so the user can cross-reference with config.
                 Text.DrawText(new StringBuilder("#" + lootIdx),
-                    new Vector2(x + listWidth - 80, textY),
-                    new Color(0.6f, 0.6f, 0.6f, 1f), 0.6f, 0);
+                    new Vector2(x + listWidth - 80f * scale, textY),
+                    new Color(0.6f, 0.6f, 0.6f, 1f), 0.6f * scale, 0);
             }
 
-            currentY += ItemHeight;
+            currentY += itemHeight;
         }
     }
 
@@ -502,33 +543,32 @@ public class LevelVanity : LevelBase
         return name;
     }
 
-    private void DrawHelpBar(float boxX, float boxWidth, float vpHeight)
+    private void DrawHelpBar(float boxX, float boxWidth, float tipsY, float scale)
     {
         var useKeyboard = player.inputProfile.keyMouseEnable;
+        var action = useKeyboard ? "[Space]" : "[a]";
         var centerX = boxX + boxWidth / 2f;
 
         var top = new StringBuilder();
         if (_mode == Mode.ItemPicker)
         {
-            top.Append("\u02ef").Append(useKeyboard ? "[a]" : "[a]").Append("\u02f0 Pick  |  ");
-            top.Append(useKeyboard ? "\u02ef[ll]/[lr]\u02f0" : "\u02ef[lt]/[rt]\u02f0").Append(" Change  |  ");
+            top.Append($"\u02ef{action}\u02f0 Pick  |  \u02ef[ll]/[lr]\u02f0 Change  |  ");
             top.Append(useKeyboard ? "\u02efBksp\u02f0 Clear" : "\u02ef[x]\u02f0 Clear");
         }
         else
         {
-            top.Append("\u02ef").Append(useKeyboard ? "[a]" : "[a]").Append("\u02f0 Pick Item  |  ");
-            top.Append(useKeyboard ? "\u02ef[ll]/[lr]\u02f0" : "\u02ef[lt]/[rt]\u02f0").Append(" Change  |  ");
+            top.Append($"\u02ef{action}\u02f0 Pick Item  |  \u02ef[ll]/[lr]\u02f0 Change  |  ");
             var nakedKb = SaS2VanitySlotsPlugin.NakedKeybind != null
                 ? SaS2VanitySlotsPlugin.NakedKeybind.DisplayString()
                 : "N";
-            top.Append("\u02ef").Append(nakedKb).Append("\u02f0 Naked  |  ");
+            top.Append($"\u02ef{nakedKb}\u02f0 Naked  |  ");
             top.Append(useKeyboard ? "\u02efBksp\u02f0 Clear" : "\u02ef[x]\u02f0 Clear");
         }
-        Text.DrawText(top, new Vector2(centerX, vpHeight - 62), Color.White, 0.6f, 1, player, 1);
+        Text.DrawText(top, new Vector2(centerX, tipsY), Color.White, 0.6f * scale, 1, player, 1);
 
         var bottom = new StringBuilder();
         bottom.Append("\u02ef[b]\u02f0 Back");
-        Text.DrawText(bottom, new Vector2(centerX, vpHeight - 38), Color.White, 0.6f, 1, player, 1);
+        Text.DrawText(bottom, new Vector2(centerX, tipsY + 30f * scale), Color.White, 0.6f * scale, 1, player, 1);
     }
 
     // -- scrolling --
@@ -541,8 +581,9 @@ public class LevelVanity : LevelBase
         if (count == 0) return;
 
         var sel = _mode == Mode.ItemPicker ? _selectedItemIndex : _selectedSlotIndex;
-        var itemTop = sel * ItemHeight;
-        var itemBottom = itemTop + ItemHeight;
+        var itemHeight = ItemHeight * _currentScale;
+        var itemTop = sel * itemHeight;
+        var itemBottom = itemTop + itemHeight;
 
         var visibleTop = _scrollOffset;
         var visibleBottom = _scrollOffset + _currentListVisibleHeight;
