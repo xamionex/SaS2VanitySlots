@@ -196,7 +196,7 @@ public class LevelVanity : LevelBase
             if (player.keys.keyCancel || player.keys.keyAccept)
             {
                 PlayCancel();
-                _mode = Mode.SlotList;
+                ReturnToSlotList();
             }
             return;
         }
@@ -204,7 +204,7 @@ public class LevelVanity : LevelBase
         if (player.keys.keyCancel)
         {
             PlayCancel();
-            _mode = Mode.SlotList;
+            ReturnToSlotList();
             return;
         }
 
@@ -222,7 +222,7 @@ public class LevelVanity : LevelBase
             var lootIdx = _candidateList[_selectedItemIndex];
             VanityStore.SetVanityLootIdx(CurrentSlot, PlayerId, SaveIdx, SaS2VanitySlotsPlugin.PerCharacter, lootIdx);
             PlayAccept();
-            _mode = Mode.SlotList;
+            ReturnToSlotList();
             return;
         }
 
@@ -231,7 +231,7 @@ public class LevelVanity : LevelBase
         {
             VanityStore.ClearSlot(CurrentSlot, PlayerId, SaveIdx, SaS2VanitySlotsPlugin.PerCharacter);
             PlaySelect();
-            _mode = Mode.SlotList;
+            ReturnToSlotList();
         }
     }
 
@@ -241,8 +241,18 @@ public class LevelVanity : LevelBase
         _candidateList = VanityStore.BuildCandidateList(player, CurrentSlot, _candidatesShowAll);
     }
 
+    // Leaves the item picker and returns to the slot list. The picker list is long, so its scroll offset is reset:
+    // keeping it would draw the seven slot rows far above the visible area, looking like an empty menu.
+    private void ReturnToSlotList()
+    {
+        _mode = Mode.SlotList;
+        _scrollOffset = 0f;
+    }
+
     // -- mouse support (mirrors SaS2ModOptions.LevelModOptions) --
 
+    // MouseMgr latches clicks and wheel notches until EndDraw, which runs once per rendered frame while this handler runs once per Update.
+    // Consuming the latch as soon as an action is taken keeps one press or one notch to a single action, matching vanilla queueClick semantics.
     private bool HandleMouseInput()
     {
         if (player.ID != 0 || !MouseMgr.isActive) return false;
@@ -263,6 +273,8 @@ public class LevelVanity : LevelBase
         if (MouseMgr.isScrollUp || MouseMgr.isScrollDown)
         {
             var dir = MouseMgr.isScrollUp ? -1 : 1;
+            MouseMgr.isScrollUp = false;
+            MouseMgr.isScrollDown = false;
             if (_mode == Mode.ItemPicker)
                 _selectedItemIndex = (_selectedItemIndex + dir + count) % count;
             else
@@ -276,7 +288,6 @@ public class LevelVanity : LevelBase
         {
             if (!PointInRect(mouse, hit.Rect)) continue;
             if (!moved && !leftClick && !rightClick) return false;
-            player.menu.mouseInRect = true;
 
             if (moved)
             {
@@ -292,6 +303,9 @@ public class LevelVanity : LevelBase
 
             if (!leftClick && !rightClick) return false;
 
+            // Any click from here on is acted upon, so consume the latched press: one press is one action.
+            ConsumeClick(leftClick, rightClick);
+
             if (_mode == Mode.ItemPicker)
             {
                 if (hit.Index != _selectedItemIndex) _selectedItemIndex = hit.Index;
@@ -300,13 +314,13 @@ public class LevelVanity : LevelBase
                     VanityStore.SetVanityLootIdx(CurrentSlot, PlayerId, SaveIdx, SaS2VanitySlotsPlugin.PerCharacter,
                         _candidateList[_selectedItemIndex]);
                     PlayAccept();
-                    _mode = Mode.SlotList;
+                    ReturnToSlotList();
                 }
                 else
                 {
                     VanityStore.ClearSlot(CurrentSlot, PlayerId, SaveIdx, SaS2VanitySlotsPlugin.PerCharacter);
                     PlaySelect();
-                    _mode = Mode.SlotList;
+                    ReturnToSlotList();
                 }
                 return true;
             }
@@ -340,6 +354,14 @@ public class LevelVanity : LevelBase
 
     private static bool PointInRect(Vector2 p, Rectangle r) =>
         p.X > r.X && p.X < r.Right && p.Y > r.Y && p.Y < r.Bottom;
+
+    // Consumes the latched click flags so a single physical press is acted on once, even when a frame runs several Updates.
+    // MouseMgr only clears them in EndDraw, which happens once per rendered frame, while the mouse is handled here in Update.
+    private static void ConsumeClick(bool left, bool right)
+    {
+        if (left) MouseMgr.isLeftClick = false;
+        if (right) MouseMgr.isRightClick = false;
+    }
 
     // -- draw --
 
